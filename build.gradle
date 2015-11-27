@@ -103,7 +103,7 @@ genServer.description = 'Create signed Server certificate.'
 
 task genUser << {
     def user = createUser()
-    delete "${buildDir}/${user.store}"
+    delete fileTree(dir: buildDir,  include: "**/${user.alias}.*")
     genStore(user.alias, user.store, [], user.dn)
     importCert(user.store,caAlias, caCert)
     def signedCert = doReqCertAndSigned(user.store, user.alias, caStore, caAlias, ['-ext', 'ku=dig,keyEncipherment'])
