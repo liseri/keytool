@@ -1,0 +1,107 @@
+ext {
+    pass = ['-storepass', 'nopassword', '-keypass', 'nopassword']
+    rootCaAlias = 'root'
+    rootCaStore = 'root.jks'
+    rootCert = 'root.cert'
+    caAlias = 'ca'
+    caStore = 'ca.jks'
+    caCert = 'ca.cert'
+    serverAlias = 'server'
+    serverStore = 'server.jks'
+}
+
+def genStore(alias, store, extension, dname){
+    exec {
+        workingDir buildDir
+        commandLine = ['keytool', '-genkeypair', '-keyalg', 'RSA', pass, ['-keystore', store], ['-alias', alias], extension, ['-dname', dname]].flatten()
+    }
+}
+
+def importCert(store, alias, cert){
+    exec {
+        workingDir buildDir
+        commandLine = ['keytool', '-importcert', '-alias', alias, '-keystore', store, pass, '-file', cert, '-noprompt'].flatten()
+    }
+}
+
+def exportCert(store, alias){
+    exec {
+        workingDir buildDir
+        commandLine = ['keytool', '-exportcert', '-alias', alias, '-keystore', store, pass, '-file', "${alias}.cert"].flatten()
+    }
+}
+
+def certReq(store, alias){
+    ByteArrayOutputStream stdOut = new ByteArrayOutputStream()
+    exec {
+        workingDir buildDir
+        commandLine = ['keytool', '-certreq', '-alias', alias, '-keystore', store, pass].flatten()
+        standardOutput = stdOut
+    }
+    return new ByteArrayInputStream(stdOut.buf)
+}
+
+def genCert(store, alias, stdIn, extension, signedCert){
+    exec {
+        workingDir buildDir
+        standardInput = stdIn
+        commandLine = ['keytool', '-gencert', '-alias', alias, '-keystore', store, pass, extension, '-outfile', signedCert].flatten()
+    }
+}
+
+def doReqCertAndSigned(reqStore, reqAlias, caStore, caAlias, extension){
+    def signedCert = "${reqAlias}.cert"
+    genCert(caStore, caAlias, certReq(reqStore, reqAlias), extension, signedCert)
+    return signedCert
+}
+
+def createUser(){
+    def uid = hasProperty('userId') ? userId : 'user1'
+    println "user id = $uid"
+    return [alias: uid, store: "${uid}.jks", p12: "${uid}.p12", dn: "uid=${uid}, ${userDomain}"]
+}
+
+def convertP12(srcStore, destStore){
+    def pwd = 'nopassword'
+    exec {
+        workingDir buildDir
+        commandLine = ['keytool', '-importkeystore', '-srckeystore', srcStore, '-srcstorepass', pwd, '-deststoretype', 'PKCS12', '-destkeystore', destStore, '-deststorepass', pwd]
+    }
+}
+
+task clean << {
+    delete buildDir
+}
+
+task mkBuildDir(dependsOn:clean) << {
+    buildDir.mkdirs()
+}
+
+task genRootCA (dependsOn:mkBuildDir) << {
+    genStore(rootCaAlias, rootCaStore, ['-ext', 'bc:c'], rootCaDname)
+    exportCert(rootCaStore, rootCaAlias)
+}
+
+task genCA (dependsOn:genRootCA) << {
+    genStore(caAlias, caStore, ['-ext', 'bc:c'], caDname)
+    importCert(caStore, rootCaAlias, rootCert)
+    def signedCert = doReqCertAndSigned(caStore, caAlias, rootCaStore, rootCaAlias, ['-ext', 'BC=0'])
+    importCert(caStore, caAlias, signedCert)
+}
+
+task genServer (dependsOn:genCA) << {
+    genStore(serverAlias, serverStore, [], serverDname)
+    importCert(serverStore, caAlias, caCert)
+    def signedCert = doReqCertAndSigned(serverStore, serverAlias, caStore, caAlias, ['-ext', 'ku=dig,keyEncipherment'])
+    importCert(serverStore, serverAlias, signedCert)
+}
+
+task genUser << {
+    def user = createUser()
+    delete "${buildDir}/${user.store}"
+    genStore(user.alias, user.store, [], user.dn)
+    importCert(user.store,caAlias, caCert)
+    def signedCert = doReqCertAndSigned(user.store, user.alias, caStore, caAlias, ['-ext', 'ku=dig,keyEncipherment'])
+    importCert(user.store, user.alias, signedCert)
+    convertP12(user.store, user.p12)
+}
