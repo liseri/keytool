@@ -72,6 +72,7 @@ def convertP12(srcStore, destStore){
 task clean << {
     delete buildDir
 }
+clean.description = 'clean project output.'
 
 task mkBuildDir(dependsOn:clean) << {
     buildDir.mkdirs()
@@ -81,6 +82,7 @@ task genRootCA (dependsOn:mkBuildDir) << {
     genStore(rootCaAlias, rootCaStore, ['-ext', 'bc:c'], rootCaDname)
     exportCert(rootCaStore, rootCaAlias)
 }
+genRootCA.description = 'Create Root CA certificate.'
 
 task genCA (dependsOn:genRootCA) << {
     genStore(caAlias, caStore, ['-ext', 'bc:c'], caDname)
@@ -88,6 +90,7 @@ task genCA (dependsOn:genRootCA) << {
     def signedCert = doReqCertAndSigned(caStore, caAlias, rootCaStore, rootCaAlias, ['-ext', 'BC=0'])
     importCert(caStore, caAlias, signedCert)
 }
+genCA.description = 'Create signed CA certificate.'
 
 task genServer (dependsOn:genCA) << {
     genStore(serverAlias, serverStore, [], serverDname)
@@ -95,6 +98,8 @@ task genServer (dependsOn:genCA) << {
     def signedCert = doReqCertAndSigned(serverStore, serverAlias, caStore, caAlias, ['-ext', 'ku=dig,keyEncipherment'])
     importCert(serverStore, serverAlias, signedCert)
 }
+
+genServer.description = 'Create signed Server certificate.'
 
 task genUser << {
     def user = createUser()
@@ -105,3 +110,7 @@ task genUser << {
     importCert(user.store, user.alias, signedCert)
     convertP12(user.store, user.p12)
 }
+
+genUser.description = "Create signed User certificate. given userId property for setting dn of user's certificate ex. -PuserId=user1"
+
+[genRootCA, genCA, genServer, genUser]*.group = 'Create Signed Cert'
