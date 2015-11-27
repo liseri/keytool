@@ -1,2 +1,4 @@
 .nb-gradle
-/build/
+build
+.gradle
+gradle-app.setting
